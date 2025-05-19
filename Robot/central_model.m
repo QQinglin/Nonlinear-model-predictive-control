@@ -1,0 +1,117 @@
+classdef central_model < handle
+    properties
+        nx {mustBeInteger} = 6;           % Number of states
+        nu {mustBeInteger} = 4;           % Number of controls
+        nlambda {mustBeInteger} = 6;      % Number of adjoint variable
+        P;               % Penalty matrix for the terminal cost
+        Q;               % Penalty matrix for the state cost
+        R;               % Penalty matrix for the control input cost
+        umin = [];                % Minimum control input
+        umax = [];                % Maximum control input
+        x0 = ones(6, 1);           % Initial state
+        x_iref ;
+        % x_ijref;
+
+        Q_12;
+        Q_21;
+
+
+    end
+
+    methods
+        function obj = central_model(params)
+            obj.P = params.P;
+            obj.Q = params.Q;
+            obj.R = params.R;
+            obj.x0 = params.x0;
+            obj.umin = params.umin;
+            obj.umax = params.umax;
+
+            obj.x_iref = [3;4;5;4;4;5];
+            % obj.x_ijref = [1,0,0]';
+            obj.Q_12 = diag(ones(6,1));
+            obj.Q_21 = diag(ones(6,1));
+        end
+
+        % System dynamics: compute state derivatives
+        function x_dot = ffct(obj, x_i, u_i)
+            G = [cos(x_i(3)), 0, 0, 0; ...
+                sin(x_i(3)), 0, 0, 0;
+                0, 1, 0, 0
+                0, 0, cos(x_i(6)), 0;
+                0, 0, sin(x_i(6)), 0;
+                0, 0, 0, 1];
+            x_dot = G * [u_i(1); u_i(2); u_i(3); u_i(4)];
+        end
+
+        % Jacobian matrix of dynamics
+        function jac_x = dfdx(obj,x_i,u_i)
+             jac_x = [0, 0, -u_i(1) * sin(x_i(3)), 0, 0, 0;
+                 0, 0, u_i(1) * cos(x_i(3)), 0, 0, 0;
+                 0, 0, 0, 0, 0, 0;
+                 0, 0, 0, 0, 0, -u_i(3) * sin(x_i(6));
+                  0, 0, 0, 0, 0, u_i(3) * cos(x_i(6));
+                 0, 0, 0, 0, 0, 0];
+        end
+
+        function cost = lfct(obj, x_i, u_i)
+            cost_1 = 0.5 * (x_i - obj.x_iref)' * obj.Q * (x_i - obj.x_iref) + 0.5 * u_i'* obj.R * u_i;
+            cost_2 = [x_i(1) - x_i(4) + 1;x_i(2)-x_i(5);x_i(3)-x_i(6);x_i(4) - x_i(1) - 1;x_i(5)-x_i(2);...
+                x_i(6)-x_i(3)]'*obj.Q_12 * [x_i(1) - x_i(4) + 1;x_i(2)-x_i(5);x_i(3)-x_i(6);x_i(4) - x_i(1) - 1;x_i(5)-x_i(2);x_i(6)-x_i(3)];
+            cost = cost_1 + cost_2;
+        end
+
+        function grad_x = dldx(obj, x_i)
+            grad_x = obj.Q * (x_i - obj.x_iref) + obj.Q_12 * [2*(x_i(1) - x_i(4) + 1);2*(x_i(2)-x_i(5));2*(x_i(3)-x_i(6));...
+                2*(x_i(4) - x_i(1) - 1);2*(x_i(5)-x_i(2));2*(x_i(6)-x_i(3))];
+
+        end
+
+        function cost = Vfct(obj, x_T)
+            cost = 0.5 * x_T' * obj.P * x_T;
+        end
+
+        function grad_x_V = dVdx(obj, x_T)
+            grad_x_V = obj.P * x_T';
+        end
+
+        function H = calcHamiltonian(obj, x, u, lambda)
+            x_dot = obj.ffct(x, u);
+            cost = obj.lfct(x, u);
+            H = lambda' * x_dot + cost;
+        end
+
+        function ui = controlInput(obj,x_i,lambda)
+            G = [cos(x_i(3)), 0, 0, 0; ...
+                sin(x_i(3)), 0, 0, 0;
+                0, 1, 0, 0
+                0, 0, cos(x_i(6)), 0;
+                0, 0, sin(x_i(6)), 0;
+                0, 0, 0, 1];
+            u0 = -inv(obj.R) * G' * lambda;
+            for i = 1:length(u0)
+                if u0(i) < obj.umin(i)
+                    u0(i) = obj.umin(i);
+                elseif u0(i) > obj.umax(i)
+                    u0(i) = obj.umax(i);
+                end
+            end
+            ui = u0;
+        end
+
+        function grad_h_lambda = calcGradHLambda(obj,t, x, lambda,t_span)
+             % Compute the gradient of Hamiltonian w.r.t. lambda
+             lambda_t = interp1(t_span', lambda, t)'; % t_span 1x21, lambda 21 x 3, x: 3x1, lambda_t 1x3
+             u = obj.controlInput(x,lambda_t);
+
+             grad_h_lambda = obj.ffct(x, u);
+        end
+
+        function grad_h_x = calcGradHX(obj,t,x_q,lambda,t_span)
+            x = interp1(t_span',x_q,t)'; % 3x1
+            u = obj.controlInput(x,lambda);
+
+            grad_h_x = -obj.dfdx(x, u)'*lambda - obj.dldx(x);
+         end
+    end
+end
