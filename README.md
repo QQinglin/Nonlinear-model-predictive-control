@@ -2,10 +2,6 @@
 
 This repository contains implementations of Sensitivity-based distributed optimal control with fixed-point iterations algorithms in Matlab.
 
-# Reinforcement Learning Project
-
-This repository contains implementations of Reinforcement Learning (RL) algorithms in Python using PyTorch and Gymnasium.
-
 ## 📌 Project Overview
 
 This project is aimed at understanding and implementing various RL algorithms from scratch, including:
